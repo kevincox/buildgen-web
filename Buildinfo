@@ -1,0 +1,4 @@
+S.import "stdlib"
+
+S.install("web.lua", L.lualibsRoot)
+S.install("web",     L.lualibsRoot)
