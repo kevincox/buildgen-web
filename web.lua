@@ -69,14 +69,27 @@ local jsminis = T.Map{
 		},
 	},
 }
+local cssminis = T.Map{
+	["yui"] = {
+		exe = "yuicompressor", -- Name of the executable
+		compile = "--type=css",
+		input = "%s",
+		output = {"-o", "%s"},
+		level = {
+			min    = {},
+			normal = {},
+			max    = {},
+		},
+	},
+}
 
 --- Check to see if a JavaScript Minifier is available.
 --
 -- Checks to see that a minifier is available and that L.web knows how
 -- to use it.
 --
--- @param name The name of the compiler (often the name of the executable).
--- @returns ``true`` if the compiler can be used otherwise ``false``.
+-- @param name The name of the minifier (often the name of the executable).
+-- @returns ``true`` if the minifier can be used otherwise ``false``.
 function L.web.hasJSMinifier ( name )
 	T.utils.assert_string(1, name)
 
@@ -88,15 +101,33 @@ function L.web.hasJSMinifier ( name )
 	return true
 end
 
---- Select which compiler to use.
+--- Check to see if a CSS Minifier is available.
 --
--- This function selects the C++ compiler to use.  You should first check if
--- the compiler is avaiable with ``S.cpp.hasCompiler()``.
+-- Checks to see that a minifier is available and that L.web knows how
+-- to use it.
 --
--- @param name The name of the compiler (often the name of the executable).
+-- @param name The name of the minifier (often the name of the executable).
+-- @returns ``true`` if the minifier can be used otherwise ``false``.
+function L.web.hasCSSMinifier ( name )
+	T.utils.assert_string(1, name)
+
+	if cssminis[name] == nil then return false end
+
+	local m = cssminis[name]
+	if not S.findExecutable(m.exe) then return false end
+
+	return true
+end
+
+--- Select which minifier to use.
+--
+-- This function selects the JS minifier to use.  You should first check if
+-- the minifier is avaiable with ``L.web.hasJSMinifier()``.
+--
+-- @param name The name of the minifier (often the name of the executable).
 function L.web.useJSMinifier ( name )
 	T.utils.assert_arg(1, name, "string",
-	                  L.web.hasCompiler, "Unknown minifier",
+	                  L.web.hasJSMinifier, "Unknown minifier",
 	                  2)
 
 	local m = jsminis[name]
@@ -130,7 +161,49 @@ function L.web.useJSMinifier ( name )
 	P.L.web.jsmini = m
 end
 
-function findJsMinifier ( )
+--- Select which minifier to use.
+--
+-- This function selects the JS minifier to use.  You should first check if
+-- the minifier is avaiable with ``L.web.hasCSSMinifier()``.
+--
+-- @param name The name of the minifier (often the name of the executable).
+function L.web.useCSSMinifier ( name )
+	T.utils.assert_arg(1, name, "string",
+	                  L.web.hasCSSMinifier, "Unknown minifier",
+	                  2)
+
+	local m = cssminis[name]
+
+	local function makeList ( path )
+		local m = m; -- The parent table.
+		local i;     -- The index in c.
+		for e in path:split("."):iter() do -- Recursively get table.
+			if i then m = m[i] end
+			i = e
+		end
+
+		if type(m[i]) == "table" then
+			m[i] = T.List(m[i])
+		else
+			m[i] = T.List{m[i]}
+		end
+
+		return m[i]
+	end
+
+	m.exe = S.findExecutable(m.exe)
+
+	makeList "compile"
+	makeList "input"
+	makeList "output"
+	makeList "level.min"
+	makeList "level.normal"
+	makeList "level.max"
+
+	P.L.web.cssmini = m
+end
+
+function findJSMinifier ( )
 	if P.L.web.jsmini then return P.L.web.jsmini end
 
 	for m in jsminis:iter() do         -- Find the a compiler that they have
@@ -147,12 +220,48 @@ function findJsMinifier ( )
 	return P.L.web.jsmini
 end
 
+function findCSSMinifier ( )
+	if P.L.web.cssmini then return P.L.web.cssmini end
+
+	for m in cssminis:iter() do         -- Find the a compiler that they have
+		if L.web.hasCSSMinifier(m) then -- installed on thier system.
+			L.web.useCSSMinifier(m)
+			break
+		end
+	end
+
+	if not P.L.web.cssmini then
+		error("Error: No CSS minifier found.", 0)
+	end
+
+	return P.L.web.cssmini
+end
+
 function L.web.minifyJS ( files, out,  options )
 	if type(files) ~= "table" then files = {files} end
 	files = T.List(files):map(C.path)
 	out   = C.path(out)
 
-	local m = findJsMinifier()
+	local m = findJSMinifier()
+
+	local a = T.List{m.exe}
+	a:extend(m.compile)
+	a:extend(m.level[optimizationLevel])
+
+	a:extend(m.output:map():format(out))
+	files:foreach(function(p) a:extend(m.input:map():format(p)) end)
+
+	C.addGenerator(files, a, {out}, {
+		description = "Compressing "..out
+	})
+end
+
+function L.web.minifyCSS ( files, out,  options )
+	if type(files) ~= "table" then files = {files} end
+	files = T.List(files):map(C.path)
+	out   = C.path(out)
+
+	local m = findCSSMinifier()
 
 	local a = T.List{m.exe}
 	a:extend(m.compile)
